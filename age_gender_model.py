@@ -1,3 +1,4 @@
+
 import torch
 import torch.nn as nn
 from transformers import ViTModel, ViTPreTrainedModel
@@ -7,6 +8,26 @@ MODEL_NAME = "abhilash88/age-gender-prediction"
 
 _MODEL = None
 _PROCESSOR = None
+
+
+AGE_RANGES = [
+    (0, 14, "0–14"),
+    (15, 20, "15–20"),
+    (21, 25, "21–25"),
+    (26, 30, "26–30"),
+    (31, 40, "31–40"),
+    (41, 50, "41–50"),
+    (51, 60, "51–60"),
+    (61, 100, "61+")
+]
+
+
+def get_age_range(age):
+    for minimum, maximum, label in AGE_RANGES:
+        if minimum <= age <= maximum:
+            return f"{label} years"
+
+    return "Unknown"
 
 
 class AgeGenderViTModel(ViTPreTrainedModel):
@@ -63,13 +84,8 @@ class AgeGenderViTModel(ViTPreTrainedModel):
         sequence_output = outputs[0]
         pooled_output = sequence_output[:, 0]
 
-        age_output = self.age_head(
-            pooled_output
-        )
-
-        gender_output = self.gender_head(
-            pooled_output
-        )
+        age_output = self.age_head(pooled_output)
+        gender_output = self.gender_head(pooled_output)
 
         logits = torch.cat(
             [age_output, gender_output],
@@ -89,8 +105,7 @@ class AgeGenderViTModel(ViTPreTrainedModel):
 
 def _load_model_once():
 
-    global _MODEL
-    global _PROCESSOR
+    global _MODEL, _PROCESSOR
 
     if _MODEL is None:
 
@@ -135,35 +150,23 @@ def predict_age_gender(image):
 
     with torch.no_grad():
 
-        outputs = model(
-            **inputs
-        )
+        outputs = model(**inputs)
 
     logits = outputs.logits[0]
 
-    age = int(
-        round(
-            logits[0].item()
-        )
-    )
+    age = int(round(logits[0].item()))
+    age = max(0, min(100, age))
 
-    age = max(
-        0,
-        min(100, age)
-    )
+    age_range = get_age_range(age)
 
-    female_probability = float(
-        logits[1].item()
-    )
+    female_probability = float(logits[1].item())
+    male_probability = 1.0 - female_probability
 
-    male_probability = (
-        1.0 - female_probability
+    gender = (
+        "Female"
+        if female_probability >= 0.5
+        else "Male"
     )
-
-    if female_probability >= 0.5:
-        gender = "Female"
-    else:
-        gender = "Male"
 
     confidence = max(
         female_probability,
@@ -172,11 +175,12 @@ def predict_age_gender(image):
 
     return {
         "age": age,
+        "age_range": age_range,
         "gender": gender,
         "gender_confidence": confidence,
         "gender_probability_male": male_probability,
         "gender_probability_female": female_probability,
-        "label": f"{age} years, {gender}",
+        "label": f"{age_range}, {gender}",
         "score": confidence
     }
 
@@ -186,7 +190,7 @@ def simple_predict(image):
     result = predict_age_gender(image)
 
     return (
-        f"{result['age']} years, "
+        f"Age Range: {result['age_range']}, "
         f"{result['gender']} "
         f"({result['gender_confidence']:.1%} confidence)"
     )
